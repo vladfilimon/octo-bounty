@@ -1,6 +1,6 @@
 pragma solidity ^0.4.22;
 import "github.com/provable-things/ethereum-api/provableAPI_0.4.25.sol";
-import "github.com/Arachnid/solidity-stringutils/strings.sol";
+import "../lib/solidity-stringutils/strings.sol";
 
 contract OctoBounty is usingProvable {
     using strings for *;
