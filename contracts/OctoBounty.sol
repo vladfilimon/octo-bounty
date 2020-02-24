@@ -34,6 +34,8 @@ contract OctoBounty is usingOraclize {
     event LogProvableQueryResult(string result);
     event LogProvableQueryFailed(string description);
     event LogBountyWinnerAddrNotFound(string description);
+    event LogDebug(string description);
+
 
     constructor (string memory _github_repo, string memory _github_issue) public payable {
         owner = msg.sender;
@@ -92,6 +94,7 @@ contract OctoBounty is usingOraclize {
         for(ielement=2; ielement < actualNum-1; ielement++) {
             if (JsmnSolLib.getBytes(_result, t.start, t.end).toSlice().equals("state".toSlice())) {
                 nextslice = JsmnSolLib.getBytes(_result, tokens[ielement + 1].start, tokens[ielement + 1].end).toSlice(); 
+                emit LogDebug(nextslice.toString());
                 if (nextslice.equals(closedStr)) {
                     isIssueClosed = true;
                     break;
@@ -129,17 +132,36 @@ contract OctoBounty is usingOraclize {
         
         commitsStats[bytes(shaStr)] = statsTotals;
     }    
-
-    function __callback(bytes32 _myid,string memory _result) public {
-        
-        if (msg.sender != oraclize_cbAddress()) revert();
-
+    
+    function parseCommitsListResponse(string memory _result) {
         uint ielement;
         string memory jsonElement;
         JsmnSolLib.Token[] memory tokens;
         uint actualNum;
         uint returnValue;
         JsmnSolLib.Token memory t;
+        string memory shaStr;
+        uint256 statsTotals;
+            
+        (returnValue, tokens, actualNum) = JsmnSolLib.parse(_result, 20);
+        
+        t = tokens[1];
+        shaStr = JsmnSolLib.getBytes(_result, t.start, t.end);
+        
+        for(ielement=2; ielement < actualNum-1; ielement++) {
+            t = tokens[ielement];
+            if (JsmnSolLib.getBytes(_result, t.start, t.end).toSlice().equals("total".toSlice())) {
+                statsTotals = parseInt(JsmnSolLib.getBytes(_result, tokens[ielement + 1].start, tokens[ielement + 1].end));
+                break;
+            }
+        }
+        
+        commitsStats[bytes(shaStr)] = statsTotals;
+    }   
+
+    function __callback(bytes32 _myid,string memory _result) public {
+        
+        if (msg.sender != oraclize_cbAddress()) revert();
         
         if (pendingQueries[_myid] == QUERY_ISSUE) {
             emit LogProvableQueryResult(_result);
@@ -158,6 +180,13 @@ contract OctoBounty is usingOraclize {
         if (pendingQueries[_myid] == QUERY_COMMIT) {
             emit LogProvableQueryResult(_result);
             parseCommitResponse(_result);
+            delete pendingQueries[_myid];
+            return;
+        }
+        
+        if (pendingQueries[_myid] == QUERY_COMMITS_LIST) {
+            emit LogProvableQueryResult(_result);
+            parseCommitsListResponse(_result);
             delete pendingQueries[_myid];
             return;
         }
@@ -186,7 +215,7 @@ contract OctoBounty is usingOraclize {
             );
         } else {
             emit LogNewProvableQuery("Provable query was sent, standing by for the answer...");
-            bytes32 queryId = oraclize_query("URL", string(abi.encodePacked("json(https://api.github.com/repos/", github_repo, '/commits/', github_issue,")")));
+            bytes32 queryId = oraclize_query("URL", string(abi.encodePacked("json(https://api.github.com/repos/", github_repo, '/commits/', github_issue,")$[?(@.event == 'referenced')].commit_url")));
             pendingQueries[queryId] = QUERY_COMMITS_LIST;
         }
     }
