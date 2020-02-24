@@ -1,6 +1,6 @@
 [submodule "lib/jsmnSol"]
-	path = lib/jsmnSol
+	path = contracts/lib/jsmnSol
 	url = git@github.com:vladfilimon/jsmnSol.git
 [submodule "lib/solidity-stringutils"]
-	path = lib/solidity-stringutils
+	path = contracts/lib/solidity-stringutils
 	url = git@github.com:vladfilimon/solidity-stringutils.git
