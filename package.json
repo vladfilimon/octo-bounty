@@ -6,6 +6,11 @@
     "npm": "6.4.x"
   },
   "devDependencies": {
+    "remix-ide": "^0.9.4",
     "truffle": "^5.1.14"
+  },
+  "dependencies": {
+    "dotenv": "^8.2.0",
+    "truffle-hdwallet-provider": "^1.0.17"
   }
 }
