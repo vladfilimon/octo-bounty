@@ -7,11 +7,17 @@ contract OctoBounty is usingOraclize {
     using strings for *;
     // Indicates weather collectAll is executing
     bool public isCollecting = false;
+    // internals for the auto collect mechanism
+    uint8 public nrParsedCommits = 0;
+    uint8 public nrParsedUsers = 0;
+    
     address owner;
     
     string public github_repo;
     string public github_issue;
+    
     bytes32[] public commits;
+    bytes32[] public usernames;
     
     
     bytes[] public contributorUsernames;
@@ -57,8 +63,9 @@ contract OctoBounty is usingOraclize {
     event LogProvableQueryResult(string result);
     event LogProvableQueryFailed(string description);
     event LogBountyWinnerAddrNotFound(string description);
-    event LogDebug(bytes32 description);
-
+    event LogDebug(string description);
+    event LogDebugPayout(bytes32 username, int percent, uint256 reward);
+    event LogDebugTotalChanges (int totalChanges);
 
     function getLastResponse() public view returns(string) { return lastResponse; }
     function OctoBounty (string memory _github_repo, string memory _github_issue) public payable {
@@ -81,8 +88,9 @@ contract OctoBounty is usingOraclize {
     }
     
     function collectAll() public payable {
-        require(this.isCollecting == false);
-        this.queryCommitsList();
+        require(isCollecting == false);
+        isCollecting = true;
+        queryCommitsList();
     }
     
     function parseUserResponse(string memory _result) {
@@ -115,13 +123,50 @@ contract OctoBounty is usingOraclize {
         strings.slice memory bio_slice = tmp.toSlice();
         lastBio = bio_slice.toString();
         bio_slice = bio_slice.find("ETH: ".toSlice()).beyond("ETH: ".toSlice());
-        //bio_slice.until(bio_slice.copy().find(" ".toSlice()).beyond(" ".toSlice()));
-        bio_slice.until(bio_slice.copy().find(" ".toSlice()));
+        if (!bio_slice.empty()) {
+            //bio_slice.until(bio_slice.copy().find(" ".toSlice()).beyond(" ".toSlice()));
+            bio_slice.until(bio_slice.copy().find(" ".toSlice()));
+            
+            lastBioMatch = bio_slice.toString();
+            usersAddresses[username] = bio_slice.toString(); // Is this needed?
+            contributorsMap[username].receiveAddress = parseAddr(bio_slice.toString());
+        }
         
-        lastBioMatch = bio_slice.toString();
-        usersAddresses[username] = bio_slice.toString();
-        contributorsMap[username].receiveAddress = parseAddr(bio_slice.toString());
+        nrParsedUsers++;
+        
+        if (isCollecting && nrParsedUsers >= usernames.length) {
+         emit LogDebug('ALL COLLECTED');
+         isCollecting = false;
+        }
     }    
+    
+    function calculateContributions() public {
+        require(isCollecting == false); 
+        uint i;
+        int totalChanges = 0;
+        int bountyPercent;
+        uint256 amountToSend;
+        string memory tmp;
+        
+        for (i=0; i < usernames.length; i++) {
+            if (contributorsMap[usernames[i]].receiveAddress != address(0)) {
+                totalChanges = totalChanges + contributorsMap[usernames[i]].statsTotals;
+            } else {
+                emit LogDebug(string(abi.encodePacked('User ',contributorsMap[usernames[i]].username,' has no eth receive address')));
+            }
+        }
+
+        emit LogDebugTotalChanges(totalChanges);
+        
+        for (i=0; i < usernames.length; i++) {
+            if (contributorsMap[usernames[i]].receiveAddress != address(0)) {
+                bountyPercent = (contributorsMap[usernames[i]].statsTotals * 100) / totalChanges;
+                amountToSend = (uint256(bountyPercent) * this.balance)/100;
+                emit LogDebugPayout(contributorsMap[usernames[i]].username, bountyPercent,amountToSend);
+                contributorsMap[usernames[i]].receiveAddress.call.value(amountToSend)();
+            }
+        }        
+    }
     
     function parseIssueStateResponse(string memory _state) {
         isIssueClosed = _state.toSlice().equals("closed".toSlice());
@@ -129,6 +174,7 @@ contract OctoBounty is usingOraclize {
     
     function parseCommitResponse(bytes32 _query_id, string memory _result)  public payable {
         lastResponse = _result;
+        uint i;
         uint ielement;
         string memory jsonElement;
         JsmnSolLib.Token[] memory tokens;
@@ -149,15 +195,35 @@ contract OctoBounty is usingOraclize {
         
         t = tokens[2];
         tmp = JsmnSolLib.getBytes(_result, t.start, t.end);
+        statsTotals = JsmnSolLib.parseInt(tmp);
+        /*
         assembly {
           statsTotals := mload(add(tmp, 32))
-        }
+        }*/
         
         
         lastUsername = username;
         contributorsMap[username].username = username;
         contributorsMap[username].statsTotals += statsTotals;
+        nrParsedCommits++;
         
+        bool userFound = false;
+        for (i=0; i < usernames.length; i++) {
+            if (keccak256(abi.encodePacked(usernames[i])) == keccak256(abi.encodePacked(username))) {
+                userFound = true;
+                break;
+            }
+        }
+        if (!userFound) {
+            usernames.push(username);
+        }
+        
+        if (isCollecting == true && nrParsedCommits >= commits.length) {
+            // should happen on the last commit if we are collecting
+            for (i=0; i < usernames.length; i++) {
+                queryUser(usernames[i].toSliceB32().toString()); // make the queryUser argument bytes32 rather than string
+            }               
+        }
         //commitsStats[bytes(shaStr)] = statsTotals;
     }
     
@@ -184,7 +250,7 @@ contract OctoBounty is usingOraclize {
             
         (returnValue, tokens, actualNum) = JsmnSolLib.parse(_result, 7); // ONLY 7 entries
         
-        //emit LogDebug(shaStr);
+
         for(ielement=0; ielement < actualNum; ielement++) {
             t = tokens[ielement];
            
@@ -196,11 +262,14 @@ contract OctoBounty is usingOraclize {
             assembly {
               shaStr := mload(add(tmp3, 32))
             }
-            lastShaStr = shaStr;           
+            lastShaStr = shaStr; //@TODO remove this 
            
             //commits.push(bytes(JsmnSolLib.getBytes(_result, tokens[ielement].start, tokens[ielement].end)));
             //commitsMap[shaStr] = JsmnSolLib.getBytes(_result, tokens[ielement].start, tokens[ielement].end);
             commits.push(shaStr);
+            if (isCollecting) {
+                queryCommit(shaStr);
+            }
         }
     }   
 
@@ -255,7 +324,7 @@ contract OctoBounty is usingOraclize {
             bytes32 queryId = oraclize_query("URL", fullQuery, 6008955);
             emit LogNewProvableQuery(queryId, "Provable query was sent, standing by for the answer...");
             pendingQueries[queryId] = QUERY_COMMIT;
-            commitQueryHash[queryId] = commit_hash;
+            commitQueryHash[queryId] = commit_hash; // Is this needed?
             
         }
     }
