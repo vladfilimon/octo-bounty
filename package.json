@@ -6,8 +6,8 @@
     "npm": "6.4.x"
   },
   "devDependencies": {
-    "remix-ide": "^0.9.4",
-    "truffle": "^5.1.19"
+    "remix-ide": "^0.10.3",
+    "truffle": "^5.11.5"
   },
   "dependencies": {
     "dotenv": "^8.2.0",
